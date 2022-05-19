@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=1920"/>
+    <meta name="description"
+          content="Tizen Download API Demo" />
+
+    <title>Tizen Download API</title>
+
+    <script>
+    
+    (function () {
+        'use strict';
+    
+    
+        /**
+         * Displays logging information on the screen and in the console.
+         * @param {string} msg - Message to log.
+         */
+        function log(msg) {
+            var logsEl = document.getElementById('logs');
+    
+            if (msg) {
+                // Update logs
+                console.log('[Download]: ', msg);
+                logsEl.innerHTML += msg + '<br />';
+            } else {
+                // Clear logs
+                logsEl.innerHTML = '';
+            }
+            logsEl.scrollTop = logsEl.scrollHeight;
+        }
+    
+        /**
+         * Displays information about downloaded files.
+         * @param {string} msg - Message to log.
+         */
+        function logFile(msg) {
+            var logsEl = document.getElementById('fileList');
+    
+            if (msg) {
+                // Update logs
+                logsEl.innerHTML += msg + '<br />';
+            } else {
+                // Clear logs
+                logsEl.innerHTML = '';
+            }
+        }
+    
+        /**
+         * Register keys used in this application
+         */
+        function registerKeys() {
+            var usedKeys = [
+                'MediaPause', 'MediaPlay', 'MediaStop', 'MediaPlayPause',
+                '0', '1', '2', '3'
+            ];
+    
+            usedKeys.forEach(
+                function (keyName) {
+                    tizen.tvinputdevice.registerKey(keyName);
+                }
+            );
+        }
+        
+        var paused = false;
+    
+        /**
+         * Handle input from remote
+         */
+        function registerKeyHandler() {
+            var url1 = 'http://techslides.com/demos/sample-videos/small.mp4';
+            var url2 = 'http://download.blender.org/peach/bigbuckbunny_movies/big_buck_bunny_1080p_h264.mov';
+    
+            document.addEventListener('keydown', function (e) {
+                switch (e.keyCode) {
+                    // key 0
+                    case 48:
+                        log();
+                        break;
+                    // key 1
+                    case 49:
+                        filesystem.listDownloadedFiles();
+                        break;
+                    // key 2
+                    case 50:
+                        download.start(url1);
+                        break;
+                    // key 3
+                    case 51:
+                        download.start(url2);
+                        break;
+                    //key PLAY_PAUSE
+                    case 10252: 
+                        if (paused) {
+                            download.resume();
+                        } else {
+                            download.pause();
+                        }
+                        break;
+                    //key MediaPause
+                    case 19:
+                        download.pause();
+                        break;
+                    //key MediaPlay
+                    case 415:
+                        download.resume();
+                        break;
+                    //key MediaStop
+                    case 413:
+                        download.cancel();
+                        break;
+                    // Key exit
+                    case 10009:
+                        tizen.application.getCurrentApplication().exit();
+                        break;
+                    // Just log not used key
+                    default:
+                        log('key pressed: ' + e.keyCode);
+                }
+            });
+        }
+    
+        /**
+         * Display application version
+         */
+        function displayVersion() {
+            var el = document.createElement('div');
+            el.id = 'version';
+            el.innerHTML = 'ver: ' + tizen.application.getAppInfo().version;
+            document.body.appendChild(el);
+        }
+    
+        /**
+         * Object handling file downloading
+         */
+        var download = {
+            getInfo: function () {
+                var downloadPossible = tizen.systeminfo.getCapability(
+                    'http://tizen.org/feature/download');
+    
+                var wifiCapable = tizen.systeminfo.getCapability(
+                    'http://tizen.org/feature/network.wifi');
+    
+                log('Download possible: ' + downloadPossible);
+                log('Wifi capable: ' + wifiCapable);
+            },
+    
+            start: function (url) {
+                var req = new tizen.DownloadRequest(url, 'downloads', 'small' + Date.now(), 'ALL');
+                req.httpHeader['Pragma'] = 'no-cache';
+    
+                var listener = {
+                    onprogress:  this.onProgress.bind(this),
+                    onpaused: this.onPaused.bind(this),
+                    oncanceled:  this.onCancelled.bind(this),
+                    oncompleted: this.onComplete.bind(this),
+                    onfailed: this.onFailed.bind(this)
+                };
+    
+                this.id = tizen.download.start(req, listener);
+    
+                progress.reset();
+            },
+    
+            pause: function () {
+                if (this.id && tizen.download.getState(this.id) === 'DOWNLOADING') {
+                    try {
+                        paused = true;
+                        tizen.download.pause(this.id);
+                    } catch (e) {
+                        log(e.message);
+                    }
+                }
+            },
+    
+            resume: function () {
+    
+                if (this.id && tizen.download.getState(this.id) === 'PAUSED') {
+                    try {
+                        paused = false;
+                        tizen.download.resume(this.id);
+                    } catch (e) {
+                        log(e.message);
+                    }
+                }
+            },
+    
+            cancel: function () {
+                var state;
+                var isCorrectState;
+    
+                if (! this.id) {
+                    return;
+                }
+    
+                state = tizen.download.getState(this.id);
+    
+                isCorrectState = state === 'QUEUED' || state === 'DOWNLOADING' || state === 'PAUSED';
+    
+                if (this.id && isCorrectState) {
+                    try {
+                        tizen.download.cancel(this.id);
+                    } catch (e) {
+                        log(e.message);
+                    }
+                }
+            },
+    
+            onProgress: function (id, receivedSize, totalSize) {
+                log('Downloaded: ' + receivedSize + ' of ' + totalSize);
+                progress.updateProgress(receivedSize, totalSize);
+            },
+    
+            onPaused: function (id) {
+                log('Download paused: ' + id);
+            },
+    
+            onComplete: function (id, fullPath) {
+                this.id = null;
+                log('Download completed: ' + fullPath);
+    
+                progress.hide();
+    
+                filesystem.listDownloadedFiles();
+            },
+    
+            onCancelled: function (id) {
+                log('Download cancelled: ' + id);
+                progress.hide();
+    
+                filesystem.listDownloadedFiles();
+            },
+    
+            onFailed: function (error) {
+                this.id = null;
+                log('Download fail: ' + error);
+            }
+    
+        };
+    
+    
+        /**
+         * Object handling filesystem operations
+         */
+        var filesystem = {
+    
+            deleteAllDownloads: function () {
+    
+                function deleteFile (handle, file) {
+                    handle.deleteFile(file.fullPath, function () {});
+                }
+    
+                this.iterate(deleteFile);
+            },
+    
+            listDownloadedFiles: function () {
+    
+                function listFile(handle, file) {
+                    logFile('File ' + file.name + ' size: ' + file.fileSize);
+                }
+    
+                logFile();
+                this.iterate(listFile);
+            },
+    
+            iterate: function (callback) {
+    
+                tizen.filesystem.resolve(
+                    'downloads',
+                    function (handle) {
+                        if (handle.isDirectory) {
+                            handle.listFiles(function (files) {
+                                files.forEach(function (file) {
+                                    callback(handle, file);
+                                });
+                            });
+                        }
+                    },
+                    function (e) {
+                        log('Error' + e.message);
+                    },
+                    'rw'
+                );
+            }
+        };
+    
+    
+        /**
+         * Object handling updating of download progress bar
+         */
+        var progress = {
+            init: function () {
+                this.dom = document.getElementById('progress');
+                this.barEl = document.getElementById('bar');
+            },
+    
+            reset: function () {
+                this.barEl.style.width = 0;
+                this.show();
+            },
+    
+            updateProgress: function (elapsed, total) {
+                var progress = 100 * elapsed / total;
+    
+                this.barEl.style.width = progress + '%';
+            },
+    
+            show: function () {
+                this.dom.style.visibility = "visible";
+            },
+    
+            hide: function () {
+                this.dom.style.visibility = "hidden";
+            }
+        };
+    
+        /**
+         * Start the application once loading is finished
+         */
+        window.onload = function init() {
+            if (window.tizen === undefined) {
+                log('This application needs to be run on Tizen device');
+                return;
+            }
+    
+            displayVersion();
+            registerKeys();
+            registerKeyHandler();
+    
+    
+            filesystem.deleteAllDownloads();
+            download.getInfo();
+            progress.init();
+        };
+    }());
+    </script>
+    <style>
+        @CHARSET "UTF-8";
+
+        body {
+            font-size: 1.5em;
+            padding: 0;
+            margin: 0;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            background-color: #222222;
+            color: silver;
+            text-shadow: #000 3px 3px 3px;
+            font-family: 'Open Sans', sans-serif;
+        }
+        
+        body:after {
+            content: "";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            background-image: url('lightblue_empty_grid.svg');
+            width: 100%;
+            height: 100%;
+            opacity: 0.05;
+            z-index: -1;
+        }
+        
+        h1, h2, h3, h4, h5, h6 {
+            font-family: sans-serif;
+            text-align: center;
+            padding: 10px;
+            color: lightgray;
+            background: rgba(0, 0, 0, 0.2);
+            margin: 0;
+        }
+        
+        p {
+            margin: 8px 0;
+        }
+        
+        .left, .right {
+            width: 50%;
+            float: left;
+            padding: 10px;
+            box-sizing: border-box;
+        }
+        
+        .left {
+            width: 60%;
+        }
+        
+        .right {
+            width: 40%;
+            font-size: 0.9em;
+        }
+        
+        
+        .logs {
+            border: 0px;
+            overflow: auto;
+            height: 290px;
+            font-family: monospace;
+        }
+        
+        .progress {
+            margin: 10px 0;
+            width: 100%;
+            height: 3px;
+            border: 1px solid #4c4646;
+            visibility: hidden;
+        }
+        
+        .bar {
+            width: 0%;
+            height: 3px;
+            background-color: #fff;
+        }
+        
+        #version {
+            position: fixed;
+            top: 5px;
+            left: 5px;
+        }</style>
+    <link rel="stylesheet" type="text/css" href="style.css" />
+
+</head>
+
+<body>
+
+    <h1>Tizen Download API</h1>
+
+    <div class="left">
+        <h2>Available buttons/actions:</h2>
+
+        <div>
+            1 - Downloaded file lists<br>
+            2 - Start download - small file<br>
+            3 - Start download - large file<br>
+            Pause - Pause download<br>
+            Play - Resume download<br>
+            Stop - Cancel download<br>
+            0 - Clear logs
+        </div>
+
+        <div id="progress" class="progress">
+            <div id="bar" class="bar"></div>
+        </div>
+
+        <fieldset>
+            <legend>Downloaded files:</legend>
+            <div id="fileList" class="logs"></div>
+        </fieldset>
+
+        <fieldset>
+            <legend>Logs</legend>
+            <div id="logs" class="logs"></div>
+        </fieldset>
+    </div>
+    <div class="right">
+        <h2>Info</h2>
+
+        <p>This application demonstrates the usage of Tizen download API</p>
+
+        <p>The application downloads files from <code>http://techslides.com</code> and <code>http://download.blender.org</code>. If these domains are not accessible it will not work.<br>
+
+            You can change the source location of files to download by changing the contents of <code>url1</code> and <code>url2</code> variables in <code>main.js</code> file</cide></p>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+</html>
